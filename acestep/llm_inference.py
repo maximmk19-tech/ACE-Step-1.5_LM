@@ -22,6 +22,15 @@ from transformers.generation.logits_process import (
     LogitsProcessorList,
     RepetitionPenaltyLogitsProcessor,
 )
+
+# Optional PEFT for LM LoRA support
+try:
+    from peft import PeftModel
+    PEFT_AVAILABLE = True
+except ImportError:
+    PEFT_AVAILABLE = False
+    PeftModel = None
+    logger.warning("PEFT library not available. LM LoRA features will be disabled.")
 from acestep.llm_backend_compat import get_vllm_preflight_warning
 from acestep.constrained_logits_processor import MetadataConstrainedLogitsProcessor
 from acestep.constants import DEFAULT_LM_INSTRUCTION, DEFAULT_LM_UNDERSTAND_INSTRUCTION, DEFAULT_LM_INSPIRED_INSTRUCTION, DEFAULT_LM_REWRITE_INSTRUCTION, DURATION_MIN, DURATION_MAX
@@ -88,6 +97,12 @@ class LLMHandler:
         # format only.
         self.use_legacy_cfg_prompt = False
 
+        # LM LoRA state
+        self.lm_lora_loaded = False
+        self.lm_lora_path = None
+        self.lm_lora_weight = 1.0
+        self._lm_base_model = None  # For storing clean base model
+
     def _clear_accelerator_cache(self) -> None:
         """Release freed accelerator memory back to the driver.
 
@@ -139,6 +154,11 @@ class LLMHandler:
             self.llm_backend = None
             self._mlx_model = None
             self._mlx_model_path = None
+            # Reset LM LoRA state
+            self.lm_lora_loaded = False
+            self.lm_lora_path = None
+            self.lm_lora_weight = 1.0
+            self._lm_base_model = None
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -184,6 +204,100 @@ class LLMHandler:
 
         models.sort()
         return models
+
+    # ========== LM LoRA Methods ==========
+    
+    def load_lm_lora(self, lora_path: str, lora_weight: float = 1.0) -> str:
+        """Load LoRA adapter for the language model.
+        
+        Args:
+            lora_path: Path to the LoRA adapter directory or HF repo.
+            lora_weight: Weight/strength to apply to the LoRA adapter (default 1.0).
+            
+        Returns:
+            Status message indicating success or failure.
+        """
+        if not PEFT_AVAILABLE:
+            return "❌ PEFT library not installed. Run: pip install peft"
+        
+        if not self.llm_initialized or self.llm is None:
+            return "❌ Please load the base LM model first."
+        
+        if not lora_path or not os.path.exists(lora_path):
+            return f"❌ Path '{lora_path}' not found."
+        
+        try:
+            # If LoRA already loaded, extract base model
+            if self.lm_lora_loaded and isinstance(self.llm, PeftModel):
+                base_model = self.llm.get_base_model()
+            else:
+                base_model = self.llm
+                self._lm_base_model = self.llm
+            
+            # Load LoRA on top of base model
+            peft_model = PeftModel.from_pretrained(
+                base_model,
+                lora_path,
+                adapter_name="lm_style_adapter"
+            )
+            
+            # Apply adapter weight
+            try:
+                peft_model.set_adapters(["lm_style_adapter"], adapter_weights=[lora_weight])
+            except Exception as e:
+                logger.warning(f"Failed to set LoRA weight: {e}")
+            
+            self.llm = peft_model
+            self.lm_lora_loaded = True
+            self.lm_lora_path = lora_path
+            self.lm_lora_weight = lora_weight
+            
+            return f"✅ LM LoRA loaded!\nPath: {lora_path}\nWeight: {lora_weight}"
+        
+        except Exception as e:
+            self.lm_lora_loaded = False
+            return f"❌ Error loading LM LoRA: {str(e)}"
+
+    def update_lm_lora_weight(self, lora_weight: float) -> str:
+        """Update the weight of the loaded LM LoRA adapter.
+        
+        Args:
+            lora_weight: New weight/strength value (0.0 to 2.0).
+            
+        Returns:
+            Status message indicating success or failure.
+        """
+        if not self.lm_lora_loaded or not isinstance(self.llm, PeftModel):
+            return "⚠️ Please load LM LoRA first."
+        
+        try:
+            self.llm.set_adapters(["lm_style_adapter"], adapter_weights=[lora_weight])
+            self.lm_lora_weight = lora_weight
+            return f"✅ LM LoRA weight updated: {lora_weight}"
+        except Exception as e:
+            return f"❌ Error updating weight: {str(e)}"
+
+    def unload_lm_lora(self) -> str:
+        """Unload LM LoRA and restore base model.
+        
+        Returns:
+            Status message indicating success or failure.
+        """
+        if not self.lm_lora_loaded:
+            return "⚠️ LM LoRA not loaded."
+        
+        try:
+            if self._lm_base_model is not None:
+                self.llm = self._lm_base_model
+                self._lm_base_model = None
+            
+            self.lm_lora_loaded = False
+            self.lm_lora_path = None
+            self.lm_lora_weight = 1.0
+            
+            return "✅ LM LoRA unloaded, base model restored."
+        except Exception as e:
+            return f"❌ Error unloading LM LoRA: {str(e)}"
 
     def get_gpu_memory_utilization(self, model_path: str = None, minimal_gpu: float = 8, min_ratio: float = 0.2, max_ratio: float = 0.9) -> Tuple[float, bool]:
         """

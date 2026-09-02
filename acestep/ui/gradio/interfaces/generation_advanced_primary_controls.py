@@ -67,7 +67,7 @@ def build_lm_controls(service_mode: bool) -> dict[str, Any]:
         service_mode: Whether the UI is running in service mode (disables some controls).
 
     Returns:
-        A component map containing LM sampling, CoT, negative prompt, and batch controls.
+        A component map containing LM sampling, CoT, negative prompt, batch controls, and LM LoRA settings.
     """
 
     with gr.Accordion(t("generation.advanced_lm_section"), open=False, elem_classes=["has-info-container"]):
@@ -168,6 +168,36 @@ def build_lm_controls(service_mode: bool) -> dict[str, Any]:
                 elem_classes=["has-info-container"],
             )
 
+    # LM LoRA Settings Accordion
+    with gr.Accordion(t("generation.lm_lora_accordion_title"), open=False, elem_classes=["has-info-container"]):
+        with gr.Row():
+            lm_lora_path_input = gr.Textbox(
+                label=t("generation.lm_lora_path_label"),
+                placeholder=t("generation.lm_lora_path_placeholder"),
+                info=t("generation.lm_lora_path_info"),
+                scale=3,
+            )
+            lm_lora_weight_slider = gr.Slider(
+                minimum=0.0,
+                maximum=2.0,
+                step=0.1,
+                value=1.0,
+                label=t("generation.lm_lora_weight_label"),
+                info=t("generation.lm_lora_weight_info"),
+                scale=2,
+            )
+        
+        with gr.Row():
+            load_lm_lora_btn = gr.Button(t("generation.lm_lora_load_btn"), variant="primary", scale=1)
+            unload_lm_lora_btn = gr.Button(t("generation.lm_lora_unload_btn"), variant="secondary", scale=1)
+        
+        lm_lora_status_output = gr.Textbox(
+            label=t("generation.lm_lora_status_label"),
+            value=t("generation.lm_lora_status_default"),
+            interactive=False,
+            lines=3,
+        )
+
     return {
         "lm_temperature": lm_temperature,
         "lm_cfg_scale": lm_cfg_scale,
@@ -180,4 +210,10 @@ def build_lm_controls(service_mode: bool) -> dict[str, Any]:
         "allow_lm_batch": allow_lm_batch,
         "use_cot_caption": use_cot_caption,
         "lm_use_legacy_cfg_prompt": lm_use_legacy_cfg_prompt,
+        # New LM LoRA fields
+        "lm_lora_path_input": lm_lora_path_input,
+        "lm_lora_weight_slider": lm_lora_weight_slider,
+        "load_lm_lora_btn": load_lm_lora_btn,
+        "unload_lm_lora_btn": unload_lm_lora_btn,
+        "lm_lora_status_output": lm_lora_status_output,
     }

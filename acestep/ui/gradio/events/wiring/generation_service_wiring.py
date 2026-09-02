@@ -170,6 +170,24 @@ def register_generation_service_handlers(
         outputs=[generation_section["lora_status"]],
     )
 
+    # ========== LM LoRA Handlers ==========
+    generation_section["load_lm_lora_btn"].click(
+        fn=lambda path, weight: llm_handler.load_lm_lora(path, weight),
+        inputs=[generation_section["lm_lora_path_input"], generation_section["lm_lora_weight_slider"]],
+        outputs=[generation_section["lm_lora_status_output"]],
+    )
+
+    generation_section["unload_lm_lora_btn"].click(
+        fn=lambda: llm_handler.unload_lm_lora(),
+        outputs=[generation_section["lm_lora_status_output"]],
+    )
+
+    generation_section["lm_lora_weight_slider"].release(
+        fn=lambda weight: llm_handler.update_lm_lora_weight(weight),
+        inputs=[generation_section["lm_lora_weight_slider"]],
+        outputs=[generation_section["lm_lora_status_output"]],
+    )
+
     # ========== MLX VAE Chunk Size ==========
     generation_section["mlx_vae_chunk_size"].change(
         fn=lambda val: setattr(dit_handler, "mlx_vae_chunk_size", int(val)),
